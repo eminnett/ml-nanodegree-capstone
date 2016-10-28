@@ -1,5 +1,11 @@
 import numpy as np
 import math
+import pudb
+import copy
+
+# Maze 1: Score: 26.700
+# Maze 2: Score: 31.400
+# Maze 3: Score: 34.567
 
 class Robot(object):
     def __init__(self, maze_dim):
@@ -14,6 +20,7 @@ class Robot(object):
         self.heading = 'up'
         self.maze_dim = maze_dim
         self.exploring = True
+        self.goal_visited = False
         self.goal_location = None
         self.optimal_steps = None
         self.race_time_step = None
@@ -30,13 +37,17 @@ class Robot(object):
         0 = no wall
         1 = wall
         '''
-        maze_walls = [[-1] * maze_dim] + [[-1] * (maze_dim + 1), [-1] * maze_dim] * maze_dim
+        maze_walls = [[-1] * maze_dim]
         for i in range(maze_dim):
-            for j in range(maze_dim):
+            maze_walls.append([-1] * (maze_dim + 1))
+            maze_walls.append([-1] * maze_dim)
+
+        for i in range(2 * maze_dim + 1):
+            for j in range(len(maze_walls[i])):
                 if i == 0 or i == maze_dim * 2:
                     # exterior wall
                     maze_walls[i][j] = 1
-                elif i % 2 == 1 and (j == 0 or j == maze_dim - 1):
+                elif i % 2 == 1 and (j == 0 or j == len(maze_walls[i]) - 1):
                     # exterior wall
                     maze_walls[i][j] = 1
                 elif i == maze_dim and (j == maze_dim / 2 or j == maze_dim / 2 - 1):
@@ -55,7 +66,10 @@ class Robot(object):
         edge, and center cells have fewer possible shapes than other interior
         cells.
         '''
-        cell_possibilities = [[15] * maze_dim] * maze_dim
+        cell_possibilities = []
+        for n in range(maze_dim):
+            cell_possibilities.append([15] * maze_dim)
+
         for i in range(maze_dim):
             for j in range(maze_dim):
                 if i == 0 or i == maze_dim - 1:
@@ -96,29 +110,45 @@ class Robot(object):
         the tester to end the run and return the robot to the start.
         '''
 
+        # TODO: Add logic to make sure the robot travels to the goal before attempting to reset.
+
         if not self.exploring:
             step = self.optimal_steps[self.race_time_step]
             self.race_time_step += 1
             return step
 
+        if self.goal_location == self.location and not self.goal_visited:
+            self.goal_visited = True
+
         self.update_maze_walls(sensors)
+        if sensors == [0,0,0]:
+            rotation = 0
+            movement = -1
+        else:
+            # Navigate to the location of the maze with least knowledge.
+            target = self.center_of_largest_unknown_area()
+            # If the goal has been found, but not yet visited, go there instead.
+            if not self.goal_visited and self.goal_location != None:
+                target = self.goal_location
+            maze_graph = self.convert_maze_map_to_graph()
+            path = self.best_path_through_graph(maze_graph, self.location, target)
+            steps = self.convert_path_to_steps(path, self.heading)
 
-        unknown_center = self.center_of_largest_unknown_area(self)
-        maze_graph = self.convert_maze_map_to_graph(self, self.location, unknown_center)
-        path = self.best_path_through_graph(maze_graph)
-        steps = self.convert_path_to_steps(path)
+            rotation = steps[0][0]
+            movement = steps[0][1]
 
-        rotation = steps[0][0]
-        movement = steps[0][1]
+        print "{} ||| {} | {} ||| {} | {}".format(sensors, self.location, self.heading, rotation, movement)
+        self.pretty_print_maze_map(self.location, self.heading)
 
         self.heading = self.update_direction(self.heading, rotation)
+        self.location = self.update_location(self.heading, movement)
 
         if self.exploring and self.optimal_path_has_been_found():
             self.exploring = False
             self.race_time_step = 0
-            explored_maze_graph = self.convert_maze_map_to_graph(self, (0,0), self.goal_location)
-            optimal_path = self.best_path_through_graph(explored_maze_graph)
-            self.optimal_steps = self.convert_path_to_steps(optimal_path)
+            explored_maze_graph = self.convert_maze_map_to_graph(True, True)
+            optimal_path = self.best_path_through_graph(explored_maze_graph, (0,0), self.goal_location)
+            self.optimal_steps = self.convert_path_to_steps(optimal_path, 'up')
             return 'Reset', 'Reset'
 
         return rotation, movement
@@ -134,13 +164,13 @@ class Robot(object):
         if self.heading == 'up':
             for i in range(left_reading + 1):
                 wall_value = 1 if i == left_reading else 0
-                self.maze_walls[2 * x - i][y] = wall_value
+                self.maze_walls[2 * (x - i)][y] = wall_value
             for j in range(forward_reading + 1):
                 wall_value = 1 if j == forward_reading else 0
                 self.maze_walls[2 * x + 1][y + 1 + j] = wall_value
             for k in range(right_reading + 1):
                 wall_value = 1 if k == right_reading else 0
-                self.maze_walls[2 * x + 2 + k][y] = wall_value
+                self.maze_walls[2 * (x + 1 + k)][y] = wall_value
 
         elif self.heading == 'right':
             for i in range(left_reading + 1):
@@ -148,7 +178,7 @@ class Robot(object):
                 self.maze_walls[2 * x + 1][y + 1 + i] = wall_value
             for j in range(forward_reading + 1):
                 wall_value = 1 if j == forward_reading else 0
-                self.maze_walls[2 * x + 2 + j][y] = wall_value
+                self.maze_walls[2 * (x + 1 + j)][y] = wall_value
             for k in range(right_reading + 1):
                 wall_value = 1 if k == right_reading else 0
                 self.maze_walls[2 * x + 1][y - k] = wall_value
@@ -156,13 +186,13 @@ class Robot(object):
         elif self.heading == 'down':
             for i in range(left_reading + 1):
                 wall_value = 1 if i == left_reading else 0
-                self.maze_walls[2 * x + 2 + i][y] = wall_value
+                self.maze_walls[2 * (x + 1 + i)][y] = wall_value
             for j in range(forward_reading + 1):
                 wall_value = 1 if j == forward_reading else 0
                 self.maze_walls[2 * x + 1][y - j] = wall_value
             for k in range(right_reading + 1):
                 wall_value = 1 if k == right_reading else 0
-                self.maze_walls[2 * x - k][y] = wall_value
+                self.maze_walls[2 * (x - k)][y] = wall_value
 
         elif self.heading == 'left':
             for i in range(left_reading + 1):
@@ -170,7 +200,7 @@ class Robot(object):
                 self.maze_walls[2 * x + 1][y - i] = wall_value
             for j in range(forward_reading + 1):
                 wall_value = 1 if j == forward_reading else 0
-                self.maze_walls[2 * x - j][y] = wall_value
+                self.maze_walls[2 * (x - j)][y] = wall_value
             for k in range(right_reading + 1):
                 wall_value = 1 if k == right_reading else 0
                 self.maze_walls[2 * x + 1][y + 1 + k] = wall_value
@@ -257,10 +287,10 @@ class Robot(object):
 
     def center_of_largest_unknown_area(self):
         max_unscaled_uncertainty = max([max(column) for column in self.maze_cell_possibilities])
-        scaled_uncertainties = self.maze_cell_possibilities
+        scaled_uncertainties = copy.deepcopy(self.maze_cell_possibilities)
         for i in range(self.maze_dim):
             for j in range(self.maze_dim):
-                if self.maze_cell_possibilities == max_unscaled_uncertainty:
+                if self.maze_cell_possibilities[i][j] == max_unscaled_uncertainty:
                     search_radius = min(i, j, self.maze_dim - 1 - i, self.maze_dim - 1 - j)
                     if search_radius > 0:
                         for r in range(search_radius):
@@ -274,13 +304,13 @@ class Robot(object):
                             vals.append(self.maze_cell_possibilities[i-r][j])
                             vals.append(self.maze_cell_possibilities[i-r][j+r])
                             if min(vals) < max_unscaled_uncertainty:
-                                scaled_uncertainties[i][j] *= r
+                                scaled_uncertainties[i][j] *= r * min(vals)
                                 break
         max_scaled_uncertainty = max([max(column) for column in scaled_uncertainties])
         peak_locations = []
         for i in range(self.maze_dim):
             for j in range(self.maze_dim):
-                if self.maze_cell_possibilities == max_scaled_uncertainty:
+                if scaled_uncertainties[i][j] == max_scaled_uncertainty:
                     peak_locations.append((i, j))
         closest_peak = peak_locations[0]
         if len(peak_locations) > 1:
@@ -292,68 +322,209 @@ class Robot(object):
                     closest_peak = peak_locations[k]
         return closest_peak
 
-    def convert_maze_map_to_graph(self, location, target):
-        # Tomorrow
-        # TODO: Figure out how to convert the current knowledge of the maze into a graph.
-        pass
+    def convert_maze_map_to_graph(self, fastest_route = False, treat_unknown_as_walls = False):
+        graph = {}
+        open_list = set([(0,0)])
 
-    def best_path_through_graph(self, graph):
-        # Tomorrow
-        ''' Djikstra's algorithm '''
-        # TODO: Implement Djikstra's algorithm.
-        pass
-
-    def convert_path_to_steps(self, path):
-        heading = self.heading
-        x, y = path.pop(0)
-        steps = []
-        for node_x, node_y in path:
-            if x == node_x:
-                if node_y - y > 0:
-                    if heading == 'up':
-                        rotation = 0
-                    elif heading == 'left':
-                        rotation = 90
-                    elif heading == 'right':
-                        rotation = -90
-                else:
-                    if heading == 'down':
-                        rotation = 0
-                    elif heading == 'left':
-                        rotation = -90
-                    elif heading == 'right':
-                        rotation = 90
+        while len(open_list) > 0:
+            # Pop the next element of the open_list and set it as the current location.
+            location = open_list.pop()
+            # If the current location is a key in the graph, move to the next iteration.
+            if location in graph.keys():
+                next
             else:
-                if node_x - x > 0:
-                    if heading == 'right':
-                        rotation = 0
-                    elif heading == 'up':
-                        rotation = 90
-                    elif heading == 'down':
-                        rotation = -90
+                graph[location] = []
+            # From current location, add all valid movements from 1-3 in all four
+            # directions to the graph and the open_list, if fastest_route is False, don't allow the
+            # robot to move past an unexplored space
+            x, y = location
+            for direction in ['up', 'right', 'down', 'left']:
+                for i in range(1,4):
+                    tx, ty = x, y
+                    if direction == 'up':
+                        tx  = x + i
+                    elif direction == 'right':
+                        ty  = y + i
+                    elif direction == 'down':
+                        tx  = x - i
+                    elif direction == 'left':
+                        ty  = y - i
+
+                    target = (tx, ty)
+
+                    if self.move_is_valid(location, target, treat_unknown_as_walls):
+                        graph[location].append(target)
+                        if target not in graph.keys():
+                            open_list.add(target)
+                        if not fastest_route and self.maze_cell_possibilities[tx][ty] > 1:
+                            break
+                    else:
+                        break
+
+        return graph
+
+    def move_is_valid(self, location, target, treat_unknown_as_walls = False):
+        '''
+        Will moving from location to target given the current knowledge of the
+        maze result in hitting a wall?
+        '''
+        valid_move = True
+        x, y = location
+        tx, ty = target
+
+        wall_values = [1]
+        if treat_unknown_as_walls:
+            wall_values.append(-1)
+
+        if y == ty:
+            if tx < 0 or tx >= self.maze_dim:
+                valid_move = False
+            elif x < tx:
+                for i in range(tx - x):
+                    if self.maze_walls[2 * (x + i + 1)][y] in wall_values:
+                        valid_move = False
+                        break
+            else:
+                for i in range(x - tx):
+                    if self.maze_walls[2 * (x - i)][y] in wall_values:
+                        valid_move = False
+                        break
+        else:
+            if ty < 0 or ty >= self.maze_dim:
+                valid_move = False
+            elif y < ty:
+                for i in range(ty - y):
+                    if self.maze_walls[2 * x + 1][y + i + 1] in wall_values:
+                        valid_move = False
+                        break
+            else:
+                for i in range(y - ty):
+                    if self.maze_walls[2 * x + 1][y - i] in wall_values:
+                        valid_move = False
+                        break
+
+        return valid_move
+
+
+    def best_path_through_graph(self, graph, start, target):
+        ''' Djikstra's algorithm '''
+
+        # Let the node at which we are starting be called the initial node. Let the distance of node Y be the distance from the initial node to Y. Dijkstra's algorithm will assign some initial distance values and will try to improve them step by step.
+
+        # Assign to every node a tentative distance value: set it to zero for our initial node and to infinity for all other nodes.
+
+        path_costs = {}
+        for node in graph.keys():
+            path_costs[node] = float("inf")
+        path_costs[start] = 0
+
+        # Set the initial node as current. Mark all other nodes unvisited. Create a set of all the unvisited nodes called the unvisited set.
+
+        current_node = start
+        unvisited_list = graph.keys()
+
+        while len(unvisited_list) > 0:
+            # For the current node, consider all of its unvisited neighbors and calculate their tentative distances. Compare the newly calculated tentative distance to the current assigned value and assign the smaller one. For example, if the current node A is marked with a distance of 6, and the edge connecting it with a neighbor B has length 2, then the distance to B (through A) will be 6 + 2 = 8. If B was previously marked with a distance greater than 8 then change it to 8. Otherwise, keep the current value.
+
+            for neighbour in graph[current_node]:
+                if neighbour in unvisited_list:
+                    distance = path_costs[current_node] + 1
+                    if path_costs[neighbour] > distance:
+                        path_costs[neighbour] = distance
+
+            # When we are done considering all of the neighbors of the current node, mark the current node as visited and remove it from the unvisited set. A visited node will never be checked again.
+
+            unvisited_list.remove(current_node)
+
+            # If the destination node has been marked visited (when planning a route between two specific nodes) or if the smallest tentative distance among the nodes in the unvisited set is infinity (when planning a complete traversal; occurs when there is no connection between the initial node and remaining unvisited nodes), then stop. The algorithm has finished.
+
+            if current_node == target:
+                break
+
+            # Otherwise, select the unvisited node that is marked with the smallest tentative distance, set it as the new "current node", and go back to step 3.
+
+            closest_distance = float("inf")
+            for node in unvisited_list:
+                if path_costs[node] < closest_distance:
+                    current_node = node
+
+        optimal_path = [target]
+        current_node = target
+        while start not in optimal_path:
+            neighbours = graph[current_node]
+            optimal_step = neighbours[0]
+            for neighbour in neighbours:
+                if path_costs[neighbour] < path_costs[optimal_step]:
+                    optimal_step = neighbour
+            current_node = optimal_step
+            optimal_path = [optimal_step] + optimal_path
+
+        return optimal_path
+
+    def convert_path_to_steps(self, path, heading):
+        start = path.pop(0)
+        steps = []
+        deltas = self.convert_path_to_deltas_max_3(start, path)
+        for delta_x, delta_y in deltas:
+            rotation = 0
+            if (heading == 'up' and delta_y < 0) or (heading == 'right' and delta_x < 0) or (heading == 'down' and delta_y > 0) or (heading == 'left' and delta_x > 0):
+                movement = -max(abs(delta_x), abs(delta_y))
+            else:
+                if delta_y == 0:
+                    if delta_x > 0:
+                        if heading == 'up':
+                            rotation = 90
+                        elif heading == 'down':
+                            rotation = -90
+                    else:
+                        if heading == 'up':
+                            rotation = -90
+                        elif heading == 'down':
+                            rotation = 90
                 else:
-                    if heading == 'left':
-                        rotation = 0
-                    elif heading == 'up':
-                        rotation = -90
-                    elif heading == 'down':
-                        rotation = 90
-            movement = max(abs(node_x - x), abs(node_y - y))
-            if movement > 3:
-                movement = 3
+                    if delta_y > 0:
+                        if heading == 'left':
+                            rotation = 90
+                        elif heading == 'right':
+                            rotation = -90
+                    else:
+                        if heading == 'left':
+                            rotation = -90
+                        elif heading == 'right':
+                            rotation = 90
+                movement = max(abs(delta_x), abs(delta_y))
             steps.append((rotation, movement))
             heading = self.update_direction(heading, rotation)
-            x, y = x + value_inside_range(node_x - x, -3, 3), y + value_inside_range(node_y - y, -3, 3)
 
         return steps
 
-    def value_inside_range(value, min, max):
-        if value < min:
-            return min
-        elif value > max
-            return max
-        else
-            return value
+    def convert_path_to_deltas_max_3(self, start, path):
+        x, y = start
+        deltas = []
+        for node_x, node_y in path:
+            if y == node_y:
+                step = node_x - x
+                while step > 3 or step < -3:
+                    if step > 0:
+                        deltas.append((3,0))
+                        step -= 3
+                    else:
+                        deltas.append((-3,0))
+                        step += 3
+                deltas.append((step,0))
+            else:
+                step = node_y - y
+                while step > 3 or step < -3:
+                    if step > 0:
+                        deltas.append((0,3))
+                        step -= 3
+                    else:
+                        deltas.append((0,-3))
+                        step += 3
+                deltas.append((0,step))
+
+            x, y = node_x, node_y
+        return deltas
 
     def update_direction(self, heading, rotation):
         if rotation == 0:
@@ -377,13 +548,58 @@ class Robot(object):
             elif heading == 'left':
                 return 'up'
 
-    def optimal_path_has_been_found(self):
-        # Tomorrow
-        # TODO: Figure out how to determine if the optimal path has been found.
+    def update_location(self, heading, movement):
+        x, y = self.location
+        if heading == 'up':
+            return (x, y + movement)
+        elif heading == 'right':
+            return (x + movement, y)
+        elif heading == 'down':
+            return (x, y - movement)
+        elif heading == 'left':
+            return (x - movement, y)
 
+    def optimal_path_has_been_found(self):
         if self.goal_location == None:
             return False
 
-        shortest_known_path = ...
-        shortest_possible_path = ...
+        print "Goal Location is: {}".format(self.goal_location)
+
+        known_maze_graph = self.convert_maze_map_to_graph(True, True)
+        if self.goal_location not in known_maze_graph.keys():
+            print "Goal not yet navigable!"
+            return False
+
+        open_maze_graph = self.convert_maze_map_to_graph(True, False)
+
+        shortest_known_path = self.best_path_through_graph(known_maze_graph, (0,0), self.goal_location)
+        shortest_possible_path = self.best_path_through_graph(open_maze_graph, (0,0), self.goal_location)
         return len(shortest_known_path) <= len(shortest_possible_path)
+
+    def pretty_print_maze_map(self, location, heading):
+        x, y = location
+        heading_representation = {'up': '/\\', 'right': '> ', 'down': '\\/', 'left': ' <'}
+        vertical_wall_chars = {-1: ':', 0: ' ', 1: '|'}
+        horizontal_wall_chars = {-1: '..', 0: '  ', 1: '--'}
+        maze_rows = [''] * (2 * self.maze_dim + 1)
+        for i in range(2 * self.maze_dim + 1):
+            for j in range(len(self.maze_walls[i])):
+                if i % 2 == 0:
+                    # vertical walls
+                    maze_rows[2*j] += '*'
+                    maze_rows[2*j + 1] += vertical_wall_chars[self.maze_walls[i][j]]
+                else:
+                    # horizontal walls
+                    maze_rows[2*j] += horizontal_wall_chars[self.maze_walls[i][j]]
+                    if 2*j + 1 < len(maze_rows):
+                        space = '  '
+                        if (i - 1) / 2 == x and j == y:
+                            space = heading_representation[heading]
+                        maze_rows[2*j + 1] += space
+            if i % 2 == 0:
+                maze_rows[-1] += '*'
+        maze_rows.reverse()
+        maze_drawing = ''
+        for row in maze_rows:
+            maze_drawing += row + "\n"
+        print maze_drawing
