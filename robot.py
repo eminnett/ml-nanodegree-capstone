@@ -3,9 +3,9 @@ import math
 import pudb
 import copy
 
-# Maze 1: Score: 26.700
-# Maze 2: Score: 31.400
-# Maze 3: Score: 34.567
+# Maze 1: Score: 23.633
+# Maze 2: Score: 34.033
+# Maze 3: Score: 34.467
 
 class Robot(object):
     def __init__(self, maze_dim):
@@ -20,6 +20,8 @@ class Robot(object):
         self.heading = 'up'
         self.maze_dim = maze_dim
         self.exploring = True
+        self.take_second_step = False
+        self.second_step_instructions = None
         self.goal_visited = False
         self.goal_location = None
         self.optimal_steps = None
@@ -110,7 +112,7 @@ class Robot(object):
         the tester to end the run and return the robot to the start.
         '''
 
-        # TODO: Add logic to make sure the robot travels to the goal before attempting to reset.
+        # TODO: Add logic to handle a stuck state (ie toggling between two positions until time runs out). This should be done by tracking locations as well as previous sets of steps so a second step from the same path can be taken instead of toggling back to the previous position and continuing in the stuck state.
 
         if not self.exploring:
             step = self.optimal_steps[self.race_time_step]
@@ -121,9 +123,26 @@ class Robot(object):
             self.goal_visited = True
 
         self.update_maze_walls(sensors)
-        if sensors == [0,0,0]:
-            rotation = 0
-            movement = -1
+
+        if self.exploring and self.goal_visited and self.optimal_path_has_been_found():
+            self.exploring = False
+            self.race_time_step = 0
+            explored_maze_graph = self.convert_maze_map_to_graph(True, True)
+            optimal_path = self.best_path_through_graph(explored_maze_graph, (0,0), self.goal_location, True)
+            self.optimal_steps = self.convert_path_to_steps(optimal_path, 'up')
+            print "Best found path: {}".format(optimal_path)
+            print "Best found path steps count: {}".format(len(self.optimal_steps))
+            return 'Reset', 'Reset'
+
+
+        second_step_node = None
+        if self.take_second_step and self.second_step_instructions != None:
+            second_step_node = self.calculate_node(self.location, self.heading, self.second_step_instructions)
+
+        if second_step_node != None and self.move_is_valid(self.location, second_step_node):
+            rotation = self.second_step_instructions[0]
+            movement = self.second_step_instructions[1]
+            self.take_second_step = False
         else:
             # Navigate to the location of the maze with least knowledge.
             target = self.center_of_largest_unknown_area()
@@ -134,6 +153,12 @@ class Robot(object):
             path = self.best_path_through_graph(maze_graph, self.location, target)
             steps = self.convert_path_to_steps(path, self.heading)
 
+            if len(path) > 1:
+                self.take_second_step = True
+                self.second_step_instructions = steps[1]
+            else:
+                self.second_step_instructions = None
+
             rotation = steps[0][0]
             movement = steps[0][1]
 
@@ -142,14 +167,6 @@ class Robot(object):
 
         self.heading = self.update_direction(self.heading, rotation)
         self.location = self.update_location(self.heading, movement)
-
-        if self.exploring and self.optimal_path_has_been_found():
-            self.exploring = False
-            self.race_time_step = 0
-            explored_maze_graph = self.convert_maze_map_to_graph(True, True)
-            optimal_path = self.best_path_through_graph(explored_maze_graph, (0,0), self.goal_location)
-            self.optimal_steps = self.convert_path_to_steps(optimal_path, 'up')
-            return 'Reset', 'Reset'
 
         return rotation, movement
 
@@ -363,6 +380,40 @@ class Robot(object):
 
         return graph
 
+    def calculate_node(self, location, heading, instructions):
+        rotation, movement = instructions
+        x, y = location
+        if heading == 'up':
+            if rotation == -90:
+                x -= movement
+            elif rotation == 0:
+                y += movement
+            elif rotation == 90:
+                x += movement
+        elif heading == 'right':
+            if rotation == -90:
+                y += movement
+            elif rotation == 0:
+                x += movement
+            elif rotation == 90:
+                y -= movement
+        elif heading == 'down':
+            if rotation == -90:
+                x += movement
+            elif rotation == 0:
+                y -= movement
+            elif rotation == 90:
+                x -= movement
+        elif heading == 'left':
+            if rotation == -90:
+                y -= movement
+            elif rotation == 0:
+                x -= movement
+            elif rotation == 90:
+                y += movement
+
+        return (x, y)
+
     def move_is_valid(self, location, target, treat_unknown_as_walls = False):
         '''
         Will moving from location to target given the current knowledge of the
@@ -406,7 +457,7 @@ class Robot(object):
         return valid_move
 
 
-    def best_path_through_graph(self, graph, start, target):
+    def best_path_through_graph(self, graph, start, target, final_path = False):
         ''' Djikstra's algorithm '''
 
         # Let the node at which we are starting be called the initial node. Let the distance of node Y be the distance from the initial node to Y. Dijkstra's algorithm will assign some initial distance values and will try to improve them step by step.
@@ -427,10 +478,10 @@ class Robot(object):
             # For the current node, consider all of its unvisited neighbors and calculate their tentative distances. Compare the newly calculated tentative distance to the current assigned value and assign the smaller one. For example, if the current node A is marked with a distance of 6, and the edge connecting it with a neighbor B has length 2, then the distance to B (through A) will be 6 + 2 = 8. If B was previously marked with a distance greater than 8 then change it to 8. Otherwise, keep the current value.
 
             for neighbour in graph[current_node]:
-                if neighbour in unvisited_list:
-                    distance = path_costs[current_node] + 1
-                    if path_costs[neighbour] > distance:
-                        path_costs[neighbour] = distance
+                # if neighbour in unvisited_list:
+                distance = path_costs[current_node] + 1
+                if path_costs[neighbour] > distance:
+                    path_costs[neighbour] = distance
 
             # When we are done considering all of the neighbors of the current node, mark the current node as visited and remove it from the unvisited set. A visited node will never be checked again.
 
@@ -438,8 +489,8 @@ class Robot(object):
 
             # If the destination node has been marked visited (when planning a route between two specific nodes) or if the smallest tentative distance among the nodes in the unvisited set is infinity (when planning a complete traversal; occurs when there is no connection between the initial node and remaining unvisited nodes), then stop. The algorithm has finished.
 
-            if current_node == target:
-                break
+            # if current_node == target:
+            #     break
 
             # Otherwise, select the unvisited node that is marked with the smallest tentative distance, set it as the new "current node", and go back to step 3.
 
@@ -450,6 +501,8 @@ class Robot(object):
 
         optimal_path = [target]
         current_node = target
+        if final_path:
+            self.pretty_print_maze_map((0,0), 'up', path_costs)
         while start not in optimal_path:
             neighbours = graph[current_node]
             optimal_step = neighbours[0]
@@ -576,7 +629,7 @@ class Robot(object):
         shortest_possible_path = self.best_path_through_graph(open_maze_graph, (0,0), self.goal_location)
         return len(shortest_known_path) <= len(shortest_possible_path)
 
-    def pretty_print_maze_map(self, location, heading):
+    def pretty_print_maze_map(self, location, heading, path_costs = None):
         x, y = location
         heading_representation = {'up': '/\\', 'right': '> ', 'down': '\\/', 'left': ' <'}
         vertical_wall_chars = {-1: ':', 0: ' ', 1: '|'}
@@ -592,9 +645,18 @@ class Robot(object):
                     # horizontal walls
                     maze_rows[2*j] += horizontal_wall_chars[self.maze_walls[i][j]]
                     if 2*j + 1 < len(maze_rows):
-                        space = '  '
-                        if (i - 1) / 2 == x and j == y:
-                            space = heading_representation[heading]
+                        if path_costs == None:
+                            space = '  '
+                            if (i - 1) / 2 == x and j == y:
+                                space = heading_representation[heading]
+                        else:
+                            loc = ((i - 1) / 2, j)
+                            if loc in path_costs.keys():
+                                space = str(path_costs[loc])
+                                if len(space) == 1:
+                                    space = ' ' + space
+                            else:
+                                space = '??'
                         maze_rows[2*j + 1] += space
             if i % 2 == 0:
                 maze_rows[-1] += '*'
