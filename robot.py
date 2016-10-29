@@ -3,9 +3,9 @@ import math
 import pudb
 import copy
 
-# Maze 1: Score: 21.233 (17 steps)
-# Maze 2: Score: 29.433 (22 steps)
-# Maze 3: Score: 33.267 (25 steps)
+# Maze 1: Score: 20.667 (17 steps)
+# Maze 2: Score: 28.567 (22 steps)
+# Maze 3: Score: 31.767 (25 steps)
 
 class Robot(object):
     def __init__(self, maze_dim):
@@ -143,7 +143,7 @@ class Robot(object):
             self.take_second_step = False
         else:
             # Navigate to the location of the maze with least knowledge.
-            target = self.center_of_largest_unknown_area()
+            target = self.closest_least_certain_node()
             # If the goal has been found, but not yet visited, go there instead.
             if not self.goal_visited and self.goal_location != None:
                 target = self.goal_location
@@ -300,29 +300,13 @@ class Robot(object):
             else:
                 self.maze_walls[i][j] = 1
 
-    def center_of_largest_unknown_area(self):
-        max_unscaled_uncertainty = max([max(column) for column in self.maze_cell_possibilities])
-        scaled_uncertainties = copy.deepcopy(self.maze_cell_possibilities)
-        for i in range(self.maze_dim):
-            for j in range(self.maze_dim):
-                if self.maze_cell_possibilities[i][j] == max_unscaled_uncertainty:
-                    search_radius = min(i, j, self.maze_dim - 1 - i, self.maze_dim - 1 - j)
-                    if search_radius > 0:
-                        for r in range(search_radius):
-                            vals = []
-                            coords = [(i, j+r), (i+r, j+r), (i+r, j), (i+r, j-r),
-                                      (i, j-r), (i-r, j-r), (i-r, j), (i-r, j+r)]
-                            for coord in coords:
-                                x, y = coord
-                                vals.append(self.maze_cell_possibilities[x][y])
-                            if min(vals) < max_unscaled_uncertainty:
-                                scaled_uncertainties[i][j] *= r * min(vals)
-                                break
-        max_scaled_uncertainty = max([max(column) for column in scaled_uncertainties])
+    def closest_least_certain_node(self):
+        uncertainties = self.maze_cell_possibilities
+        max_uncertainty = max([max(column) for column in uncertainties])
         peak_locations = []
         for i in range(self.maze_dim):
             for j in range(self.maze_dim):
-                if scaled_uncertainties[i][j] == max_scaled_uncertainty:
+                if uncertainties[i][j] == max_uncertainty:
                     peak_locations.append((i, j))
         closest_peak = peak_locations[0]
         if len(peak_locations) > 1:
