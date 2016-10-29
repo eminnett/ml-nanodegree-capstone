@@ -112,8 +112,6 @@ class Robot(object):
         the tester to end the run and return the robot to the start.
         '''
 
-        # TODO: Add logic to handle a stuck state (ie toggling between two positions until time runs out). This should be done by tracking locations as well as previous sets of steps so a second step from the same path can be taken instead of toggling back to the previous position and continuing in the stuck state.
-
         if not self.exploring:
             step = self.optimal_steps[self.race_time_step]
             self.race_time_step += 1
@@ -312,14 +310,11 @@ class Robot(object):
                     if search_radius > 0:
                         for r in range(search_radius):
                             vals = []
-                            vals.append(self.maze_cell_possibilities[i][j+r])
-                            vals.append(self.maze_cell_possibilities[i+r][j+r])
-                            vals.append(self.maze_cell_possibilities[i+r][j])
-                            vals.append(self.maze_cell_possibilities[i+r][j-r])
-                            vals.append(self.maze_cell_possibilities[i][j-r])
-                            vals.append(self.maze_cell_possibilities[i-r][j-r])
-                            vals.append(self.maze_cell_possibilities[i-r][j])
-                            vals.append(self.maze_cell_possibilities[i-r][j+r])
+                            coords = [(i, j+r), (i+r, j+r), (i+r, j), (i+r, j-r),
+                                      (i, j-r), (i-r, j-r), (i-r, j), (i-r, j+r)]
+                            for coord in coords:
+                                x, y = coord
+                                vals.append(self.maze_cell_possibilities[x][y])
                             if min(vals) < max_unscaled_uncertainty:
                                 scaled_uncertainties[i][j] *= r * min(vals)
                                 break
@@ -382,35 +377,22 @@ class Robot(object):
 
     def calculate_node(self, location, heading, instructions):
         rotation, movement = instructions
-        x, y = location
-        if heading == 'up':
-            if rotation == -90:
-                x -= movement
-            elif rotation == 0:
-                y += movement
-            elif rotation == 90:
-                x += movement
-        elif heading == 'right':
-            if rotation == -90:
-                y += movement
-            elif rotation == 0:
-                x += movement
-            elif rotation == 90:
-                y -= movement
-        elif heading == 'down':
-            if rotation == -90:
-                x += movement
-            elif rotation == 0:
-                y -= movement
-            elif rotation == 90:
-                x -= movement
-        elif heading == 'left':
-            if rotation == -90:
-                y -= movement
-            elif rotation == 0:
-                x -= movement
-            elif rotation == 90:
-                y += movement
+        x, y  = location
+        up    = heading  == 'up'
+        right = heading  == 'right'
+        down  = heading  == 'down'
+        left  = heading  == 'left'
+        ccw   = rotation == -90
+        fwd   = rotation == 0
+        cw    = rotation == 90
+        if (up and ccw) or (down and cw) or (left and fwd):
+            x -= movement
+        elif (up and fwd) or (right and ccw) or (left and cw):
+            y += movement
+        elif (up and cw) or (right and fwd) or (down and ccw) :
+            x += movement
+        elif (right and cw) or (down and fwd) or (left and ccw) :
+            y -= movement
 
         return (x, y)
 
