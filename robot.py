@@ -3,9 +3,9 @@ import math
 import pudb
 import copy
 
-# Maze 1: Score: 23.633
-# Maze 2: Score: 34.033
-# Maze 3: Score: 34.467
+# Maze 1: Score: 21.233 (17 steps)
+# Maze 2: Score: 29.433 (22 steps)
+# Maze 3: Score: 33.267 (25 steps)
 
 class Robot(object):
     def __init__(self, maze_dim):
@@ -165,8 +165,8 @@ class Robot(object):
         print "{} ||| {} | {} ||| {} | {}".format(sensors, self.location, self.heading, rotation, movement)
         self.pretty_print_maze_map(self.location, self.heading)
 
+        self.location = self.calculate_node(self.location, self.heading, (rotation, movement))
         self.heading = self.update_direction(self.heading, rotation)
-        self.location = self.update_location(self.heading, movement)
 
         return rotation, movement
 
@@ -468,41 +468,49 @@ class Robot(object):
         for node in graph.keys():
             path_costs[node] = float("inf")
         path_costs[start] = 0
+        costs_updated = True
 
         # Set the initial node as current. Mark all other nodes unvisited. Create a set of all the unvisited nodes called the unvisited set.
 
         current_node = start
-        unvisited_list = graph.keys()
 
-        while len(unvisited_list) > 0:
-            # For the current node, consider all of its unvisited neighbors and calculate their tentative distances. Compare the newly calculated tentative distance to the current assigned value and assign the smaller one. For example, if the current node A is marked with a distance of 6, and the edge connecting it with a neighbor B has length 2, then the distance to B (through A) will be 6 + 2 = 8. If B was previously marked with a distance greater than 8 then change it to 8. Otherwise, keep the current value.
+        # Repeat Djikstra's algorithm until the the path costs converge to
+        # their true value. This has proven to be an important step as each
+        # node can be accessed via many different paths.
+        while costs_updated == True:
+            costs_updated = False
+            unvisited_list = copy.copy(graph.keys())
+            while len(unvisited_list) > 0:
+                # For the current node, consider all of its unvisited neighbors and calculate their tentative distances. Compare the newly calculated tentative distance to the current assigned value and assign the smaller one. For example, if the current node A is marked with a distance of 6, and the edge connecting it with a neighbor B has length 2, then the distance to B (through A) will be 6 + 2 = 8. If B was previously marked with a distance greater than 8 then change it to 8. Otherwise, keep the current value.
 
-            for neighbour in graph[current_node]:
-                # if neighbour in unvisited_list:
-                distance = path_costs[current_node] + 1
-                if path_costs[neighbour] > distance:
-                    path_costs[neighbour] = distance
+                cost = min(path_costs[current_node], min([path_costs[neighbour] + 1 for neighbour in graph[current_node]]))
+                path_costs[current_node] = cost
+                distance = cost + 1
+                for neighbour in graph[current_node]:
+                    if path_costs[neighbour] > distance:
+                        path_costs[neighbour] = distance
+                        costs_updated = True
 
-            # When we are done considering all of the neighbors of the current node, mark the current node as visited and remove it from the unvisited set. A visited node will never be checked again.
+                # When we are done considering all of the neighbors of the current node, mark the current node as visited and remove it from the unvisited set. A visited node will never be checked again.
 
-            unvisited_list.remove(current_node)
+                unvisited_list.remove(current_node)
 
-            # If the destination node has been marked visited (when planning a route between two specific nodes) or if the smallest tentative distance among the nodes in the unvisited set is infinity (when planning a complete traversal; occurs when there is no connection between the initial node and remaining unvisited nodes), then stop. The algorithm has finished.
+                # Select the unvisited node that is marked with the smallest tentative distance, set it as the new "current node", and go back to the beginning of the loop.
 
-            # if current_node == target:
-            #     break
+                closest_distance = float("inf")
+                for node in unvisited_list:
+                    if path_costs[node] < closest_distance:
+                        current_node = node
 
-            # Otherwise, select the unvisited node that is marked with the smallest tentative distance, set it as the new "current node", and go back to step 3.
-
-            closest_distance = float("inf")
-            for node in unvisited_list:
-                if path_costs[node] < closest_distance:
-                    current_node = node
+        if final_path:
+            print 'Path costs for each explored space within the maze:'
+            self.pretty_print_maze_map((0,0), 'up', path_costs)
 
         optimal_path = [target]
         current_node = target
-        if final_path:
-            self.pretty_print_maze_map((0,0), 'up', path_costs)
+
+        # Contrsuct the optimal path by following the gradient of path costs
+        # from the goal to the start.
         while start not in optimal_path:
             neighbours = graph[current_node]
             optimal_step = neighbours[0]
@@ -600,17 +608,6 @@ class Robot(object):
                 return 'left'
             elif heading == 'left':
                 return 'up'
-
-    def update_location(self, heading, movement):
-        x, y = self.location
-        if heading == 'up':
-            return (x, y + movement)
-        elif heading == 'right':
-            return (x + movement, y)
-        elif heading == 'down':
-            return (x, y - movement)
-        elif heading == 'left':
-            return (x - movement, y)
 
     def optimal_path_has_been_found(self):
         if self.goal_location == None:
