@@ -4,6 +4,16 @@ import copy
 import operator
 
 class Navigator(object):
+    '''
+    The Navigator encapsulates the core Robot logic and is responsible for
+    the following:
+        - Maintaining the current loctation and heading values on behalf of
+            for the Robot given the movements and rotations issued while
+            exploring.
+        - Deciding the best rotation and movement to make while exploring
+            the maze given the current state of the Navigator's Mapper instance.
+        - Finding the optimal path through the maze.
+    '''
     def __init__(self, maze_dim):
         self.maze_dim = maze_dim
 
@@ -22,51 +32,80 @@ class Navigator(object):
         self.mapper = Mapper(maze_dim)
 
     def update_map(self, sensors):
+        '''
+        Save the latest sensor readings and the mapper to update its knowledge
+        about the mze walls.
+        '''
         self.latest_sensor_reading = sensors
         self.mapper.update_wall_knowledge(self.location, self.heading, sensors)
 
     def explore(self):
-
+        '''
+        Decide the rotation and movement the robot should make in order to
+        maximise knowledge of the maze.
+        '''
         if self.mapper.goal_location == self.location and not self.goal_visited:
             self.goal_visited = True
 
-        second_step_node = None
-        if self.take_second_step and self.second_step_instructions != None:
-            second_step_node = self.calculate_node(self.location, self.heading, self.second_step_instructions)
+        step = self.calculate_next_step()
+        rotation, movement = step
 
-        if second_step_node != None and self.move_is_valid(self.location, second_step_node):
-            rotation = self.second_step_instructions[0]
-            movement = self.second_step_instructions[1]
-            self.take_second_step = False
-        else:
-            # Navigate to the location of the maze with least knowledge.
-            target = self.closest_least_certain_node()
-            # If the goal has been found, but not yet visited, go there instead.
-            if not self.goal_visited and self.mapper.goal_found():
-                target = self.mapper.goal_location
-            maze_graph = self.convert_maze_map_to_graph()
-            path = self.best_path_through_graph(maze_graph, self.location, target)
-            steps = self.convert_path_to_steps(path, self.heading)
-
-            if len(path) > 1:
-                self.take_second_step = True
-                self.second_step_instructions = steps[1]
-            else:
-                self.second_step_instructions = None
-
-            rotation = steps[0][0]
-            movement = steps[0][1]
-
-        print "{} ||| {} | {} ||| {} | {}".format(self.latest_sensor_reading, self.location, self.heading, rotation, movement)
+        print "{} ||| {} | {} ||| {}".format(self.latest_sensor_reading,
+            self.location, self.heading, step)
         self.mapper.pretty_print_maze_map(self.location, self.heading)
 
-
-        self.location = self.calculate_node(self.location, self.heading, (rotation, movement))
+        self.location = self.calculate_node(self.location, self.heading, step)
         self.heading = self.calculate_heading(self.heading, rotation)
 
-        return rotation, movement
+        return step
+
+    def calculate_next_step(self):
+        '''
+        In order to improve the efficiency of the Robot's traversal of the maze
+        and to avoid the Robot getting stuck 'ping-ponging' between two nodes
+        indefinitely, the Navigator will attempt to follow the first two steps
+        of each calculated path through the maze. The only cases when this isn't
+        done is when the path has only one step or when the second step becomes
+        invalid as a result of the sensor reaidngs following the first step.
+
+        When attempting to calculate a new path, the target node is either the
+        closest node with the greatest uncertainty or the goal node if its
+        location is known, but has not yet been visited.
+        '''
+        loc = self.location
+        heading = self.heading
+        second_step_node = None
+        second_step = self.second_step_instructions
+        if self.take_second_step and second_step != None:
+            second_step_node = self.calculate_node(loc, heading, second_step)
+
+        if second_step_node != None and self.move_is_valid(loc, second_step_node):
+            self.take_second_step = False
+            return second_step
+
+        # Navigate to the location of the maze with least knowledge.
+        target = self.closest_least_certain_node()
+        # If the goal has been found, but not yet visited, go there instead.
+        if not self.goal_visited and self.mapper.goal_found():
+            target = self.mapper.goal_location
+        maze_graph = self.convert_maze_map_to_graph()
+        path = self.best_path_through_graph(maze_graph, loc, target)
+        steps = self.convert_path_to_steps(path, heading)
+
+        if len(steps) > 1:
+            self.take_second_step = True
+            self.second_step_instructions = steps[1]
+        else:
+            self.second_step_instructions = None
+
+        return steps[0]
+
 
     def closest_least_certain_node(self):
+        '''
+        Find the node with the greatest uncertainty (greatest number of
+        possible shapes) that is closest to the current location.
+        '''
         uncertainties = self.mapper.cell_possibilities
         max_uncertainty = max([max(column) for column in uncertainties])
         peak_locations = []
@@ -76,29 +115,37 @@ class Navigator(object):
                     peak_locations.append((i, j))
         closest_peak = peak_locations[0]
         if len(peak_locations) > 1:
-            x, y = self.location
+            loc = self.location
             for k in range(len(peak_locations)):
-                dist_a = math.sqrt((x-closest_peak[0])**2 + (y-closest_peak[1])**2)
-                dist_b = math.sqrt((x-peak_locations[k][0])**2 + (y-peak_locations[k][1])**2)
+                dist_a = self.distance_between_nodes(loc, closest_peak)
+                dist_b = self.distance_between_nodes(loc, peak_locations[k])
                 if dist_a > dist_b:
                     closest_peak = peak_locations[k]
         return closest_peak
 
     def convert_maze_map_to_graph(self, fastest_route = False, treat_unknown_as_walls = False):
+        '''
+        Convert the maze map to an undirected graph.
+        - If fastest_route, allow the path to include steps with maximum strides
+            even if this means moving past unvisited nodes.
+        - If treat_unknown_as_walls, prevent the path from passing between nodes
+            when the state of the wall / oppenning between them is unknown.
+        '''
         graph = {}
-        open_list = set([(0,0)])
+        open_list = set([self.start_location])
 
         while len(open_list) > 0:
-            # Pop the next element of the open_list and set it as the current location.
+            # Pop the next element of the open_list and set it as the current
+            # location.
             location = open_list.pop()
-            # If the current location is a key in the graph, move to the next iteration.
+            # If the current location is a key in the graph, move to the next
+            # iteration.
             if location in graph.keys():
                 next
             else:
                 graph[location] = []
-            # From current location, add all valid movements from 1-3 in all four
-            # directions to the graph and the open_list, if fastest_route is False, don't allow the
-            # robot to move past an unexplored space
+            # From current location, add all valid movements from 1-3 in all
+            # four directions to the graph and the open_list.
             x, y = location
             for direction in ['up', 'right', 'down', 'left']:
                 for i in range(1,4):
@@ -118,6 +165,10 @@ class Navigator(object):
                         graph[location].append(target)
                         if target not in graph.keys():
                             open_list.add(target)
+                        # Unless the path should include the fastest route,
+                        # ensure that the graph does not allow skipping over
+                        # unexplored nodes. This helps improve the efficacy
+                        # of exploration.
                         if not fastest_route and self.mapper.cell_possibilities[tx][ty] > 1:
                             break
                     else:
@@ -125,51 +176,15 @@ class Navigator(object):
 
         return graph
 
-    def calculate_node(self, location, heading, instructions):
-        rotation, movement = instructions
-        x, y  = location
-        up, right, down, left, ccw, fwd, cw = self.heading_rotation_bools(heading, rotation)
-        if (up and ccw) or (down and cw) or (left and fwd):
-            x -= movement
-        elif (up and fwd) or (right and ccw) or (left and cw):
-            y += movement
-        elif (up and cw) or (right and fwd) or (down and ccw) :
-            x += movement
-        elif (right and cw) or (down and fwd) or (left and ccw) :
-            y -= movement
-
-        return (x, y)
-
-    def calculate_heading(self, heading, rotation):
-        up, right, down, left, ccw, fwd, cw = self.heading_rotation_bools(heading, rotation)
-        if fwd:
-            return heading
-        if (ccw and up) or (cw and down):
-            return 'left'
-        if (ccw and right) or (cw and left):
-            return 'up'
-        if (ccw and down) or (cw and up):
-            return 'right'
-        if (ccw and left) or (cw and right):
-            return 'down'
-
-    def heading_rotation_bools(self, heading, rotation):
-        up    = heading  == 'up'
-        right = heading  == 'right'
-        down  = heading  == 'down'
-        left  = heading  == 'left'
-        ccw   = rotation == -90
-        fwd   = rotation == 0
-        cw    = rotation == 90
-        return up, right, down, left, ccw, fwd, cw
-
     def move_is_valid(self, location, target, treat_unknown_as_walls = False):
         '''
-        Will moving from location to target given the current knowledge of the
-        maze result in hitting a wall?
+        Will moving from location to target, given the current knowledge of the
+        maze, result in hitting a wall?
+        - If treat_unknown_as_walls, an attempt to move from location to target
+            through a wall / oppennning of unknown state is considered invalid.
         '''
         valid_move = True
-        x, y = location
+        x, y   = location
         tx, ty = target
 
         wall_values = [1]
@@ -269,36 +284,46 @@ class Navigator(object):
 
         return optimal_path
 
-    def convert_path_to_steps(self, path, heading):
+    def convert_path_to_steps(self, path, initial_heading):
+        '''
+        Convert the given path to a list of step instructions
+        (rotation, movement) given the initial heading.
+        '''
         start = path.pop(0)
+        heading = initial_heading
         steps = []
         deltas = self.convert_path_to_deltas_max_3(start, path)
         for delta_x, delta_y in deltas:
+            up    = heading  == 'up'
+            right = heading  == 'right'
+            down  = heading  == 'down'
+            left  = heading  == 'left'
             rotation = 0
-            if (heading == 'up' and delta_y < 0) or (heading == 'right' and delta_x < 0) or (heading == 'down' and delta_y > 0) or (heading == 'left' and delta_x > 0):
+            if ((up and delta_y < 0) or (right and delta_x < 0) or
+                    (down and delta_y > 0) or (left and delta_x > 0)):
                 movement = -max(abs(delta_x), abs(delta_y))
             else:
                 if delta_y == 0:
                     if delta_x > 0:
-                        if heading == 'up':
+                        if up:
                             rotation = 90
-                        elif heading == 'down':
+                        elif down:
                             rotation = -90
                     else:
-                        if heading == 'up':
+                        if up:
                             rotation = -90
-                        elif heading == 'down':
+                        elif down:
                             rotation = 90
                 else:
                     if delta_y > 0:
-                        if heading == 'left':
+                        if left:
                             rotation = 90
-                        elif heading == 'right':
+                        elif right:
                             rotation = -90
                     else:
-                        if heading == 'left':
+                        if left:
                             rotation = -90
-                        elif heading == 'right':
+                        elif right:
                             rotation = 90
                 movement = max(abs(delta_x), abs(delta_y))
             steps.append((rotation, movement))
@@ -307,6 +332,11 @@ class Navigator(object):
         return steps
 
     def convert_path_to_deltas_max_3(self, start, path):
+        '''
+        Break down the path to the x/y difference between each node in the
+        path with a maximum chnage of 3. This will ensure that maximum movement
+        made by the Robot while navigating path is not exceeded.
+        '''
         x, y = start
         deltas = []
         for node_x, node_y in path:
@@ -335,11 +365,18 @@ class Navigator(object):
         return deltas
 
     def found_optimal_path(self):
+        '''
+        Determine whether the optimal path through the maze has been found.
+        If this is the first time the optimal path has been found, save it.
+        '''
         if not self.mapper.goal_found():
             return False
         goal_location = self.mapper.goal_location
 
         print "Goal Location is: {}".format(goal_location)
+
+        if self.optimal_path != None:
+            return True
 
         known_maze_graph = self.convert_maze_map_to_graph(True, True)
         if goal_location not in known_maze_graph.keys():
@@ -348,18 +385,87 @@ class Navigator(object):
 
         open_maze_graph = self.convert_maze_map_to_graph(True, False)
 
-        shortest_known_path = self.best_path_through_graph(known_maze_graph, self.start_location, goal_location)
-        shortest_possible_path = self.best_path_through_graph(open_maze_graph, self.start_location, goal_location)
-        optimal_path_has_been_found = len(shortest_known_path) <= len(shortest_possible_path)
+        # Compare the best path through the maze assuming all unknown walls
+        # are walls vs all unknown walls are opennings. If the path lengths are
+        # the same, the optimal path has been found.
+        shortest_known_path = self.best_path_through_graph(known_maze_graph,
+                                            self.start_location, goal_location)
+        shortest_possible_path = self.best_path_through_graph(open_maze_graph,
+                                            self.start_location, goal_location)
+        optimal_path_found = len(shortest_known_path) == len(shortest_possible_path)
 
-        if optimal_path_has_been_found:
+        if optimal_path_found:
             self.optimal_path = shortest_known_path
             self.optimal_steps = self.convert_path_to_steps(self.optimal_path, 'up')
-        return optimal_path_has_been_found
+        return optimal_path_found
 
     def print_maze_with_path_costs(self):
+        '''
+        Print the explored map including the path costs for each explored cell.
+        '''
         if not self.mapper.goal_found():
-            print "Can not print maze with path costs. The goal has not yet been found."
+            print "Can not print maze with path costs. The goal has not been found."
             return False
         known_maze_graph = self.convert_maze_map_to_graph(True, True)
-        self.best_path_through_graph(known_maze_graph, self.start_location, self.mapper.goal_location, True)
+        self.best_path_through_graph(known_maze_graph, self.start_location,
+                                                self.mapper.goal_location, True)
+
+    # Navigation utility methods:
+
+    def distance_between_nodes(self, a, b):
+        ''' Return the distance between the two given nodes. '''
+        xa, ya = a
+        xb, yb = b
+        return math.hypot(xb-xa, yb-ya)
+
+    def calculate_node(self, location, heading, instructions):
+        '''
+        Given a location and heading, determine which node a set of instructions
+        would lead to.
+        '''
+        rotation, movement = instructions
+        x, y  = location
+        up, right, down, left, ccw, fwd, cw = self.heading_rotation_bools(heading, rotation)
+        if (up and ccw) or (down and cw) or (left and fwd):
+            x -= movement
+        elif (up and fwd) or (right and ccw) or (left and cw):
+            y += movement
+        elif (up and cw) or (right and fwd) or (down and ccw) :
+            x += movement
+        elif (right and cw) or (down and fwd) or (left and ccw) :
+            y -= movement
+
+        return (x, y)
+
+    def calculate_heading(self, heading, rotation):
+        '''
+        Given a heading and rotation, wwhat would the new heading be if the
+        rotation was made?
+        '''
+        up, right, down, left, ccw, fwd, cw = self.heading_rotation_bools(heading, rotation)
+        if fwd:
+            return heading
+        if (ccw and up) or (cw and down):
+            return 'left'
+        if (ccw and right) or (cw and left):
+            return 'up'
+        if (ccw and down) or (cw and up):
+            return 'right'
+        if (ccw and left) or (cw and right):
+            return 'down'
+
+    def heading_rotation_bools(self, heading, rotation):
+        '''
+        Convert the heading and rotation values to booleans.
+        '''
+        up    = heading  == 'up'
+        right = heading  == 'right'
+        down  = heading  == 'down'
+        left  = heading  == 'left'
+        # counterclockwise
+        ccw   = rotation == -90
+        # forward
+        fwd   = rotation == 0
+        # clockwise
+        cw    = rotation == 90
+        return up, right, down, left, ccw, fwd, cw

@@ -51,7 +51,7 @@ class Robot(object):
 
         if nav.goal_visited and nav.found_optimal_path():
             self.racing = True
-            self.navigator.print_maze_with_path_costs()
+            nav.print_maze_with_path_costs()
             print "Best found path: {}".format(nav.optimal_path)
             print "Best found path steps count: {}".format(len(nav.optimal_steps))
             return 'Reset', 'Reset'
