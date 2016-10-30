@@ -1,6 +1,7 @@
 from mapper import Mapper
 import math
 import copy
+import operator
 
 class Navigator(object):
     def __init__(self, maze_dim):
@@ -206,49 +207,52 @@ class Navigator(object):
 
 
     def best_path_through_graph(self, graph, start, target, print_path_costs = False):
-        ''' Djikstra's algorithm '''
+        '''
+        Use Djikstra's algorithm to find the fastest path from start to target
+        through the the given undirected graph.
+        '''
 
-        # Let the node at which we are starting be called the initial node. Let the distance of node Y be the distance from the initial node to Y. Dijkstra's algorithm will assign some initial distance values and will try to improve them step by step.
+        # Assign to every node a tentative distance value: set it to zero for
+        # our initial node and to infinity for all other nodes.
 
-        # Assign to every node a tentative distance value: set it to zero for our initial node and to infinity for all other nodes.
+        largest_possible_cost = self.maze_dim ** 2
 
         path_costs = {}
+
+        # Used for sorting by path cost.
+        cost_for_node = lambda n: path_costs[n]
+
         for node in graph.keys():
-            path_costs[node] = float("inf")
+            path_costs[node] = largest_possible_cost
         path_costs[start] = 0
-        costs_updated = True
 
-        # Set the initial node as current. Mark all other nodes unvisited. Create a set of all the unvisited nodes called the unvisited set.
-
+        # Set the initial node as current. Mark all other nodes unvisited.
+        # Create a set of all the unvisited nodes called the unvisited set.
         current_node = start
+        unvisited_list = copy.copy(graph.keys())
 
-        # Repeat Djikstra's algorithm until the the path costs converge to
-        # their true value. This has proven to be an important step as each
-        # node can be accessed via many different paths.
-        while costs_updated == True:
-            costs_updated = False
-            unvisited_list = copy.copy(graph.keys())
-            while len(unvisited_list) > 0:
-                # For the current node, consider all of its unvisited neighbors and calculate their tentative distances. Compare the newly calculated tentative distance to the current assigned value and assign the smaller one. For example, if the current node A is marked with a distance of 6, and the edge connecting it with a neighbor B has length 2, then the distance to B (through A) will be 6 + 2 = 8. If B was previously marked with a distance greater than 8 then change it to 8. Otherwise, keep the current value.
+        while len(unvisited_list) > 0:
+            # For the current node, consider all of its neighbours and
+            # calculate their tentative distances. Compare the newly
+            # calculated tentative distance to the current assigned value
+            # and assign the smaller one otherwise, keep the current value.
 
-                cost = min(path_costs[current_node], min([path_costs[neighbour] + 1 for neighbour in graph[current_node]]))
-                path_costs[current_node] = cost
-                distance = cost + 1
-                for neighbour in graph[current_node]:
-                    if path_costs[neighbour] > distance:
-                        path_costs[neighbour] = distance
-                        costs_updated = True
+            distance = path_costs[current_node] + 1
+            for neighbour in graph[current_node]:
+                if path_costs[neighbour] > distance:
+                    path_costs[neighbour] = distance
 
-                # When we are done considering all of the neighbors of the current node, mark the current node as visited and remove it from the unvisited set. A visited node will never be checked again.
+            # When we are done considering all of the neighbors of the current
+            # node, mark the current node as visited and remove it from the
+            # unvisited set. A visited node will never be checked again.
 
-                unvisited_list.remove(current_node)
+            unvisited_list.remove(current_node)
 
-                # Select the unvisited node that is marked with the smallest tentative distance, set it as the new "current node", and go back to the beginning of the loop.
-
-                closest_distance = float("inf")
-                for node in unvisited_list:
-                    if path_costs[node] < closest_distance:
-                        current_node = node
+            if len(unvisited_list) > 0:
+                # Select the unvisited node that is marked with the
+                # smallest tentative distance, set it as the new
+                # "current node", and go back to the beginning of the loop.
+                current_node = sorted(unvisited_list, key=cost_for_node)[0]
 
         if print_path_costs:
             print 'Path costs for each explored space within the maze:'
@@ -260,13 +264,8 @@ class Navigator(object):
         # Construct the optimal path by following the gradient of path costs
         # from the goal to the start.
         while start not in optimal_path:
-            neighbours = graph[current_node]
-            optimal_step = neighbours[0]
-            for neighbour in neighbours:
-                if path_costs[neighbour] < path_costs[optimal_step]:
-                    optimal_step = neighbour
-            current_node = optimal_step
-            optimal_path = [optimal_step] + optimal_path
+            current_node = sorted(graph[current_node], key=cost_for_node)[0]
+            optimal_path = [current_node] + optimal_path
 
         return optimal_path
 
