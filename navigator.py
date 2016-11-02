@@ -26,6 +26,9 @@ class Navigator(object):
         self.optimal_steps = None
         self.goal_visited = False
 
+        self.take_additional_steps = False
+        self.additional_step_instructions = []
+        self.nodes_visited = [self.start_location]
         self.take_second_step = False
         self.second_step_instructions = None
 
@@ -57,6 +60,8 @@ class Navigator(object):
         self.location = self.calculate_node(self.location, self.heading, step)
         self.heading = self.calculate_heading(self.heading, rotation)
 
+        self.nodes_visited.append(self.location)
+
         return step
 
     def calculate_next_step(self):
@@ -74,8 +79,19 @@ class Navigator(object):
         '''
         loc = self.location
         heading = self.heading
+
+        if self.take_additional_steps:
+            next_step = self.additional_step_instructions.pop()
+            next_node = self.calculate_node(loc, heading, next_step)
+            if next_node != None and self.move_is_valid(loc, next_node):
+                self.take_additional_steps = len(self.additional_step_instructions) > 0
+                return next_step
+            else:
+                self.take_additional_steps = False
+
         second_step_node = None
         second_step = self.second_step_instructions
+
         if self.take_second_step and second_step != None:
             second_step_node = self.calculate_node(loc, heading, second_step)
 
@@ -92,6 +108,11 @@ class Navigator(object):
         path = self.best_path_through_graph(maze_graph, loc, target)
         steps = self.convert_path_to_steps(path, heading)
 
+        repeat_length = self.check_for_repeats_in_visited_nodes()
+        if repeat_length > 0:
+            self.take_additional_steps = True
+            self.additional_step_instructions = steps[1:repeat_length + 1]
+
         if len(steps) > 1:
             self.take_second_step = True
             self.second_step_instructions = steps[1]
@@ -99,6 +120,24 @@ class Navigator(object):
             self.second_step_instructions = None
 
         return steps[0]
+
+    def check_for_repeats_in_visited_nodes(self):
+        '''
+        Check to see if the Robot is stuck 'ping-ponging' between a set of nodes. This checks for repeated paths of lengths between 2 and 6. The robot is conidered to be in a stuck state if it follows a path, retraces its steps, and then follows the original path again. It is assumed that if this happens, the Robot would continue this pattern indefinitely.
+        '''
+        loop_lengths = range(2, 6)
+        robot_is_stuck = False
+        repeat_length = 0
+        for length in loop_lengths:
+            first_path  = self.nodes_visited[-length:]
+            second_path = self.nodes_visited[-length * 2 + 1:-length + 1]
+            second_path.reverse()
+            third_path  = self.nodes_visited[-length * 3 + 2:-length * 2 + 2]
+            if first_path == second_path and second_path == third_path:
+                repeat_length = length
+                break
+
+        return repeat_length
 
 
     def closest_least_certain_node(self):
@@ -129,7 +168,7 @@ class Navigator(object):
         - If fastest_route, allow the path to include steps with maximum strides
             even if this means moving past unvisited nodes.
         - If treat_unknown_as_walls, prevent the path from passing between nodes
-            when the state of the wall / oppenning between them is unknown.
+            when the state of the wall / opening between them is unknown.
         '''
         graph = {}
         open_list = set([self.start_location])
@@ -181,7 +220,7 @@ class Navigator(object):
         Will moving from location to target, given the current knowledge of the
         maze, result in hitting a wall?
         - If treat_unknown_as_walls, an attempt to move from location to target
-            through a wall / oppennning of unknown state is considered invalid.
+            through a wall / openning of unknown state is considered invalid.
         '''
         valid_move = True
         x, y   = location
@@ -223,64 +262,66 @@ class Navigator(object):
 
     def best_path_through_graph(self, graph, start, target, print_path_costs = False):
         '''
-        Use Djikstra's algorithm to find the fastest path from start to target
+        Use Dijkstra's algorithm to find the fastest path from start to target
         through the the given undirected graph.
         '''
+        optimal_path = []
 
-        # Assign to every node a tentative distance value: set it to zero for
-        # our initial node and to infinity for all other nodes.
+        # Make sure the target is in the graph
+        if target in graph.keys():
+            # Assign to every node a tentative distance value: set it to zero for
+            # our initial node and to infinity for all other nodes.
 
-        largest_possible_cost = self.maze_dim ** 2
+            largest_possible_cost = self.maze_dim ** 2
 
-        path_costs = {}
+            path_costs = {}
 
-        # Used for sorting by path cost.
-        cost_for_node = lambda n: path_costs[n]
+            # Used for sorting by path cost.
+            cost_for_node = lambda n: path_costs[n]
 
-        for node in graph.keys():
-            path_costs[node] = largest_possible_cost
-        path_costs[start] = 0
+            for node in graph.keys():
+                path_costs[node] = largest_possible_cost
+            path_costs[start] = 0
 
-        # Set the initial node as current. Mark all other nodes unvisited.
-        # Create a set of all the unvisited nodes called the unvisited set.
-        current_node = start
-        unvisited_list = copy.copy(graph.keys())
+            # Set the initial node as current. Mark all other nodes unvisited.
+            # Create a set of all the unvisited nodes called the unvisited set.
+            current_node = start
+            unvisited_list = copy.copy(graph.keys())
 
-        while len(unvisited_list) > 0:
-            # For the current node, consider all of its neighbours and
-            # calculate their tentative distances. Compare the newly
-            # calculated tentative distance to the current assigned value
-            # and assign the smaller one otherwise, keep the current value.
+            while len(unvisited_list) > 0:
+                # For the current node, consider all of its neighbours and
+                # calculate their tentative distances. Compare the newly
+                # calculated tentative distance to the current assigned value
+                # and assign the smaller one otherwise, keep the current value.
 
-            distance = path_costs[current_node] + 1
-            for neighbour in graph[current_node]:
-                if path_costs[neighbour] > distance:
-                    path_costs[neighbour] = distance
+                distance = path_costs[current_node] + 1
+                for neighbour in graph[current_node]:
+                    if path_costs[neighbour] > distance:
+                        path_costs[neighbour] = distance
 
-            # When we are done considering all of the neighbors of the current
-            # node, mark the current node as visited and remove it from the
-            # unvisited set. A visited node will never be checked again.
+                # When we are done considering all of the neighbors of the current
+                # node, mark the current node as visited and remove it from the
+                # unvisited set. A visited node will never be checked again.
 
-            unvisited_list.remove(current_node)
+                unvisited_list.remove(current_node)
 
-            if len(unvisited_list) > 0:
-                # Select the unvisited node that is marked with the
-                # smallest tentative distance, set it as the new
-                # "current node", and go back to the beginning of the loop.
-                current_node = sorted(unvisited_list, key=cost_for_node)[0]
+                if len(unvisited_list) > 0:
+                    # Select the unvisited node that is marked with the
+                    # smallest tentative distance, set it as the new
+                    # "current node", and go back to the beginning of the loop.
+                    current_node = sorted(unvisited_list, key=cost_for_node)[0]
 
-        if print_path_costs:
-            print 'Path costs for each explored space within the maze:'
-            self.mapper.pretty_print_maze_map((0,0), 'up', path_costs)
+            if print_path_costs:
+                print 'Path costs for each explored space within the maze:'
+                self.mapper.pretty_print_maze_map((0,0), 'up', path_costs)
 
-        optimal_path = [target]
-        current_node = target
-
-        # Construct the optimal path by following the gradient of path costs
-        # from the goal to the start.
-        while start not in optimal_path:
-            current_node = sorted(graph[current_node], key=cost_for_node)[0]
-            optimal_path = [current_node] + optimal_path
+            optimal_path.append(target)
+            current_node = target
+            # Construct the optimal path by following the gradient of path costs
+            # from the goal to the start.
+            while start not in optimal_path:
+                current_node = sorted(graph[current_node], key=cost_for_node)[0]
+                optimal_path = [current_node] + optimal_path
 
         return optimal_path
 
@@ -373,7 +414,7 @@ class Navigator(object):
             return False
         goal_location = self.mapper.goal_location
 
-        print "Goal Location is: {}".format(goal_location)
+        # print "Goal Location is: {}".format(goal_location)
 
         if self.optimal_path != None:
             return True

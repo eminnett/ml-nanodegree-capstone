@@ -2,8 +2,8 @@ class Mapper(object):
     '''
     The Mapper is responsible for maintaining a map of what is known about
     the maze. This is achieved by storing and upding two sets of two-dimensional
-    lists. One stores knowledge about the walls and oppennings in the maze
-    along with where in the maze the state of a wall or oppenning is unknown.
+    lists. One stores knowledge about the walls and openings in the maze
+    along with where in the maze the state of a wall or opening is unknown.
     The other two-dimensional list stores information about how many possible
     shapes each cell could have given the current knowledge of the maze walls.
     This second two-dimensional list, in effect, represents the uncertainty
@@ -16,6 +16,12 @@ class Mapper(object):
 
         self.walls = self.initial_walls(maze_dim)
         self.cell_possibilities = self.initial_cell_possibilities(maze_dim)
+
+        dim = maze_dim
+        self.goal_wall_coords = [(dim + 1, dim / 2 + 1), (dim + 2, dim / 2),
+                                 (dim + 2, dim / 2 - 1), (dim + 1, dim / 2 - 1),
+                                 (dim - 1, dim / 2 - 1), (dim - 2, dim / 2 - 1),
+                                 (dim - 2, dim / 2), (dim - 1, dim / 2 + 1)]
 
     def goal_found(self):
         ''' Has the goal been found? '''
@@ -51,7 +57,7 @@ class Mapper(object):
                 right  = i == maze_dim * 2
                 bottom = i % 2 == 1 and j == 0
                 left   = i == 0
-                # One of the four oppennings interior to the goal area?
+                # One of the four openings interior to the goal area?
                 goal_top    = i == maze_dim and j == maze_dim / 2
                 goal_right  = i == maze_dim + 1 and j == maze_dim / 2
                 goal_bottom = i == maze_dim and j == maze_dim / 2 - 1
@@ -200,42 +206,38 @@ class Mapper(object):
     def check_goal_walls(self):
         '''
         Check to see if the goal entrance has been discovered. If either the
-        goal oppenning has been found or all 7 goal walls have been found then
-        the remaining wall locations or oppenning can be inferred respectively.
+        goal opening has been found or all 7 goal walls have been found then
+        the remaining wall locations or opening can be inferred respectively.
         '''
         if self.goal_location != None:
             return
         dim = self.maze_dim
-        goal_wall_coordinates = [(dim + 1, dim / 2 + 1), (dim + 2, dim / 2),
-                                 (dim + 2, dim / 2 - 1), (dim + 1, dim / 2 - 1),
-                                 (dim - 1, dim / 2 - 1), (dim - 2, dim / 2 - 1),
-                                 (dim - 2, dim / 2), (dim - 1, dim / 2 + 1)]
 
         vals = []
-        for i, j in goal_wall_coordinates:
+        for i, j in self.goal_wall_coords:
             vals.append(self.walls[i][j])
 
         if 0 in vals:
             # The goal openning has been found.
-            oppenning_index = vals.index(0)
+            opening_index = vals.index(0)
         elif len([x for x in vals if x != -1]) == 7:
             # All 7 walls surrounding the goal have been found.
-            oppenning_index = vals.index(-1)
+            opening_index = vals.index(-1)
         else:
             return
 
-        if oppenning_index in [0,1]:
+        if opening_index in [0,1]:
             self.goal_location = (dim / 2, dim / 2)
-        elif oppenning_index in [2,3]:
+        elif opening_index in [2,3]:
             self.goal_location = (dim / 2, dim / 2 - 1)
-        elif oppenning_index in [4,5]:
+        elif opening_index in [4,5]:
             self.goal_location = (dim / 2 - 1, dim / 2 - 1)
-        elif oppenning_index in [6,7]:
+        elif opening_index in [6,7]:
             self.goal_location = (dim / 2 - 1, dim / 2)
 
-        for k in range(len(goal_wall_coordinates)):
-            i, j = goal_wall_coordinates[k]
-            if k == oppenning_index:
+        for k in range(len(self.goal_wall_coords)):
+            i, j = self.goal_wall_coords[k]
+            if k == opening_index:
                 self.walls[i][j] = 0
             else:
                 self.walls[i][j] = 1
