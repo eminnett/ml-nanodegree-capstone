@@ -7,7 +7,7 @@ class Navigator(object):
     '''
     The Navigator encapsulates the core Robot logic and is responsible for
     the following:
-        - Maintaining the current loctation and heading values on behalf of
+        - Maintaining the current location and heading values on behalf of
             for the Robot given the movements and rotations issued while
             exploring.
         - Deciding the best rotation and movement to make while exploring
