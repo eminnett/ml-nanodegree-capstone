@@ -49,3 +49,9 @@ This script will run the robot against all of the mazes in the generated_mazes f
 ```
 $ python batch_maze_runner.py
 ```
+
+## Generate report PDF
+
+```
+$ ipython nbconvert "Plot and Navigate a Virtual Maze.ipynb" --to pdf
+```
